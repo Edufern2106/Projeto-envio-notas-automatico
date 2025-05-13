@@ -1,0 +1,8 @@
+Processo	Etapa	Tempo por Nota (min)	Notas/Mês	Tempo Total (min)	Tempo Total (h)
+Manual	Escrever e-mail	2	50	100	1,67
+Manual	Procurar/anexar arquivos	2	50	100	1,67
+Manual	Conferir/enviar	1	50	50	0,83
+Manual Total		5	50	250	4,17
+Automatizado	Conferir/editar/enviar	0,5	50	25	0,42
+Automatizado Total		0,5	50	25	0,42
+Tempo economizado				225	3,75
