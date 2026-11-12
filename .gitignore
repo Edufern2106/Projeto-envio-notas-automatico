@@ -9,6 +9,9 @@ venv/
 frontend/dist/
 frontend/node_modules/
 
+# Logs de acesso (dados sensíveis, não versionar)
+backend/access.log
+
 # OS
 .DS_Store
 Thumbs.db
