@@ -1,0 +1,120 @@
+name: Auditoria de Segurança Diária
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # Todo dia às 09:00 UTC (06:00 BRT)
+  workflow_dispatch:        # Permite rodar manualmente
+
+jobs:
+  audit:
+    name: Verificação de Segurança
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      # ── Python ──────────────────────────────────────────────────────────────
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências Python
+        run: pip install -q -r backend/requirements.txt pip-audit
+
+      - name: Escanear vulnerabilidades Python (pip-audit)
+        run: pip-audit -r backend/requirements.txt --format markdown >> $GITHUB_STEP_SUMMARY
+
+      # ── Node.js ─────────────────────────────────────────────────────────────
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependências npm
+        run: cd frontend && npm ci --silent
+
+      - name: Escanear vulnerabilidades npm (npm audit)
+        run: |
+          cd frontend
+          echo "## npm audit" >> $GITHUB_STEP_SUMMARY
+          npm audit --audit-level=high --json | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          vulns=d.get('vulnerabilities',{})
+          high=[k for k,v in vulns.items() if v.get('severity') in ('high','critical')]
+          print(f'Pacotes com vulnerabilidade alta/crítica: {len(high)}')
+          for h in high: print(f'  - {h}')
+          if high: sys.exit(1)
+          " >> $GITHUB_STEP_SUMMARY || true
+
+      # ── Configurações de segurança ───────────────────────────────────────────
+      - name: Verificar proteções de segurança no código
+        run: |
+          python3 - <<'EOF'
+          import sys
+
+          with open("backend/main.py") as f:
+              src = f.read()
+
+          checks = {
+              "CORS restrito (não usa *)":          'allow_origins=["*"]' not in src,
+              "Magic bytes PDF/ZIP":                "_PDF_MAGIC" in src and "_ZIP_MAGIC" in src,
+              "Limite de arquivos por envio":        "MAX_FILES_PER_REQUEST" in src,
+              "Proteção ZIP bomb":                   "MAX_ZIP_MEMBERS" in src,
+              "TTL de jobs (limpeza de memória)":    "JOB_TTL_SECONDS" in src,
+              "Swagger/ReDoc desabilitados":         "docs_url=None" in src,
+              "Log de acesso ativo":                 "access_log_middleware" in src,
+              "Erros sanitizados":                   "Erro interno no processamento" in src,
+          }
+
+          print("## Verificação de Configuração de Segurança\n")
+          print("| Proteção | Status |")
+          print("|---|---|")
+          failed = []
+          for name, ok in checks.items():
+              icon = "✅" if ok else "❌"
+              print(f"| {name} | {icon} |")
+              if not ok:
+                  failed.append(name)
+
+          if failed:
+              print(f"\n**FALHOU:** {', '.join(failed)}")
+              sys.exit(1)
+          else:
+              print("\n**Todas as proteções estão ativas.**")
+          EOF
+
+      # ── Arquivos suspeitos ───────────────────────────────────────────────────
+      - name: Detectar arquivos suspeitos no repositório
+        run: |
+          echo "## Arquivos Suspeitos" >> $GITHUB_STEP_SUMMARY
+          SUSPICIOUS=$(find . \
+            -not -path './.git/*' \
+            -not -path './frontend/node_modules/*' \
+            \( -name "*.exe" -o -name "*.sh" -o -name "*.bat" -o -name "*.ps1" \
+               -o -name "*.cmd" -o -name "*.vbs" -o -name "*.dll" \) \
+            | grep -v "^./start.sh$" || true)
+          if [ -n "$SUSPICIOUS" ]; then
+            echo "⚠️ Arquivos suspeitos encontrados:" >> $GITHUB_STEP_SUMMARY
+            echo "$SUSPICIOUS" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ Nenhum arquivo suspeito encontrado." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # ── Commits recentes ─────────────────────────────────────────────────────
+      - name: Listar commits das últimas 24 horas
+        run: |
+          echo "## Commits nas Últimas 24h" >> $GITHUB_STEP_SUMMARY
+          git log --since="24 hours ago" --pretty="format:| %h | %an | %s |" >> $GITHUB_STEP_SUMMARY || \
+            echo "| — | — | Nenhum commit nas últimas 24h |" >> $GITHUB_STEP_SUMMARY
+
+      # ── Resumo ───────────────────────────────────────────────────────────────
+      - name: Resumo final
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "Auditoria executada em: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

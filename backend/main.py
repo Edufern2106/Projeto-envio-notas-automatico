@@ -16,6 +16,8 @@ from processor import process_pdf_bytes, build_zip, _check_ocr
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+ACCESS_LOG_FILE = os.path.join(os.path.dirname(__file__), "access.log")
+
 JOBS: dict[str, dict] = {}
 
 # Limits
@@ -39,6 +41,26 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def _access_log_middleware(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    elapsed_ms = int((time.time() - start) * 1000)
+    ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+    ua = request.headers.get("User-Agent", "-")[:120]
+    line = (
+        f"{time.strftime('%Y-%m-%dT%H:%M:%S')} | {ip} | "
+        f"{request.method} {request.url.path} | "
+        f"{response.status_code} | {elapsed_ms}ms | {ua}\n"
+    )
+    try:
+        with open(ACCESS_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
+    return response
 
 
 def _validate_magic(raw: bytes, filename: str) -> None:
