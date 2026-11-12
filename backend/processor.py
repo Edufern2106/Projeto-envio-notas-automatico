@@ -28,6 +28,7 @@ _NAME_SUFFIXES = [
 ]
 
 _OCR_AVAILABLE: Optional[bool] = None
+MAX_PAGES_PER_PDF = 500
 
 
 def _check_ocr() -> bool:
@@ -128,13 +129,18 @@ def build_output_name(client_name: str, code: str, month_name: str, year: str) -
 def process_pdf_bytes(pdf_bytes: bytes, source_filename: str) -> list[dict]:
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
-    except Exception as exc:
-        logger.error("Cannot open PDF '%s': %s", source_filename, exc)
+    except Exception:
+        logger.error("Não foi possível abrir o PDF '%s'", source_filename)
         return []
+
+    total_pages = len(reader.pages)
+    if total_pages > MAX_PAGES_PER_PDF:
+        logger.warning("'%s' tem %d páginas; processando apenas as primeiras %d",
+                       source_filename, total_pages, MAX_PAGES_PER_PDF)
 
     groups: dict[str, dict] = {}
 
-    for page_num, page in enumerate(reader.pages):
+    for page_num, page in enumerate(reader.pages[:MAX_PAGES_PER_PDF]):
         text = extract_text_from_page(page)
         info = extract_info_from_text(text)
 
